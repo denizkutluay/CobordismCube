@@ -1,0 +1,226 @@
+np[L_PD] := Count[L, X[i_, j_, k_, l_] /; j - l == 1 || l - j > 1];
+nm[L_PD] := Count[L, X[i_, j_, k_, l_] /; l - j == 1 || j - l > 1];
+
+SetAttributes[p, Orderless];
+
+S[L_PD, s_String] := S[L, Characters[s] /. {"0" -> 0, "1" -> 1}];
+
+S[L_PD, a_List] := 
+ Times @@ (Thread[{List @@ L, a}] /. {{X[i_, j_, k_, l_], 0} :> 
+         p[i, j][Min[i, j]] p[k, l][Min[k, l]], {X[i_, j_, k_, l_], 
+          1} :> p[i, l][Min[i, l]] p[j, k][Min[j, k]], {x_X, "*"} :> 
+         If[Length[Union[List @@ x]] < 4, 
+          Module[{com = First[Commonest[List @@ x]]}, 
+           x*p[com, com][com]], x]}) //. 
+    p[i_, j_][m_] p[j_, k_][n_] :> 
+     p[i, k][Min[m, n]] //. {X[i_, j_, k_, l_] p[i_, j_][
+       m_] p[k_, l_][n_] :> (c[m] c[n] -> c[Min[m, n]]), 
+    X[i_, j_, k_, l_] p[i_, l_][m_] p[j_, k_][n_] :> (c[Min[m, n]] -> 
+       c[m] c[n])} //. p[_, _][m_]^_. :> c[m]
+
+Deg[expr_] := Count[expr, _vp, {0, 1}] - Count[expr, _vm, {0, 1}];
+
+V[L_PD, s_String, deg___] := 
+ V[L, Characters[s] /. {"0" -> 0, "1" -> 1}, deg]
+V[L_PD, a_List] := 
+ List @@ Expand[S[L, a] /. x_c :> ((vp @@ x) + (vm @@ x))]
+V[L_PD, a_List, deg_Integer] := 
+ Select[V[L, a], (deg == Deg[#] + (Plus @@ a)) &]
+
+d[L_PD, s_String] := d[L, Characters[s] /. {"0" -> 0, "1" -> 1}]
+d[L_PD, a_List] := 
+ S[L, a] /. {(c[x_] c[y_] -> c[z_])*_. :> {vp@x vp@y -> vp@z, 
+     vp@x vm@y -> vm@z, vm@x vp@y -> vm@z, 
+     vm@x vm@y -> 0}, (c[z_] -> c[x_] c[y_])*_. :> {vp@z -> 
+      vp@x vm@y + vm@x vp@y, vm@z -> vm@x vm@y}}
+
+KhBracket[L_PD, r_Integer, deg___] := 
+ If[r < 0 || r > Length[L], {0}, 
+  Join @@ (((v @@ #) V[L, #, deg]) & /@ 
+     Permutations[Join[Table[0, {Length[L] - r}], Table[1, {r}]]])]
+
+CC[L_PD, r_Integer, deg_Integer] := 
+ KhBracket[L, r + nm[L], deg - np[L] + 2 nm[L]]
+
+d[L_PD][expr_] := 
+ Expand[expr] /. 
+  s_*a_v :> 
+   Expand[sign = 1; 
+    Sum[If[a[[i]] == 0, 
+      sign*ReplacePart[a, 1, i]*s /. 
+       d[L, List @@ ReplacePart[a, "*", i]], sign *= -1; 0], {i, 
+      Length[a]}]]
+
+Options[Betti] = {Modulus -> Infinity};
+Rank[L_PD, r_Integer, deg_Integer, opts___] := 
+ Rank[L, r, deg, 
+   opts] = (modulus = (Modulus /. {opts} /. Options[Betti]);
+   Off[Solve::svars];
+   b0 = CC[L, r, deg];
+   l1 = Length[b1 = CC[L, r + 1, deg]];
+   eqs = (# == 0) & /@ d[L][b0] /. 
+     MapThread[Rule, {b1, vars = Array[b, l1]}];
+   rk = Which[b0 == {} || l1 == 0, 0, modulus === Infinity, 
+     Length[First[Solve[eqs, vars]]], True, 
+     Length[First[
+        Solve[Append[eqs, Modulus == modulus], vars, 
+         Mode -> Modular]]] - 1];
+   On[Solve::svars];
+   rk)
+Betti[L_PD, r_Integer, deg_Integer, opts___] := 
+ Betti[L, r, deg, 
+   opts] = (b = 
+    Length[CC[L, r, deg]] - Rank[L, r, deg, opts] - 
+     Rank[L, r - 1, deg, opts];
+   Print[StringForm["Betti[``,``] = ``", r, deg, b]]; b)
+
+qBetti[L_PD, r_Integer, 
+  opts___] := (degs = 
+   Union[Deg /@ KhBracket[L, r + nm[L]]] + np[L] - nm[L] + r;
+  (Betti[L, r, #, opts] & /@ degs).q^degs)
+
+Kh1[L_PD, opts___] := 
+ Kh1[L, opts] = 
+  Expand[Sum[t^r*qBetti[L, r, opts], {r, -nm[L], Length[L] - nm[L]}]]
+
+myLog[mono_] := 
+  Module[{powq = Exponent[mono, q], powt = Exponent[mono, t]},
+   {If[NumberQ[mono], mono, Coefficient[mono, q^powq*t^powt]], {powq, 
+     powt}}];
+myMaxq[expr_] := 
+  Max[If[Length[expr] == 2, {expr[[1, 2, 1]], expr[[2, 2, 1]]}, 
+    expr /. {x_, {y_, z_}} -> y]];
+myMinq[expr_] := 
+  Min[If[Length[expr] == 2, {expr[[1, 2, 1]], expr[[2, 2, 1]]}, 
+    expr /. {x_, {y_, z_}} -> y]];
+myMaxt[expr_] := 
+  Max[If[Length[expr] == 2, {expr[[1, 2, 2]], expr[[2, 2, 2]]}, 
+    expr /. {x_, {y_, z_}} -> z]];
+myMint[expr_] := 
+  Min[If[Length[expr] == 2, {expr[[1, 2, 2]], expr[[2, 2, 2]]}, 
+    expr /. {x_, {y_, z_}} -> z]];
+(*LaurentToTable works only when q-exponents are all odd or all even*)
+
+
+LaurentToTable[poly_] := Grid[SparseArray[
+    Module[{datalist = 
+       If[Head[poly] =!= Plus, {myLog[poly]}, myLog /@ List @@ poly], 
+      finallist},
+     Module[{minq = myMinq[datalist], maxq = myMaxq[datalist], 
+       mint = myMint[datalist], maxt = myMaxt[datalist], margins = {}},
+      Do[AppendTo[margins, {(maxq - i)/2 + 2, 1} -> i]
+       ,
+       {i, minq, maxq, 2}
+       ];
+      Do[AppendTo[margins, {1, -mint + j + 2} -> j]
+       ,
+       {j, mint, maxt}
+       ];
+      finallist = 
+       Join[margins, 
+        If[Length[datalist] == 
+          2, {{(maxq - datalist[[1, 2, 1]])/2 + 2, -mint + 
+             datalist[[1, 2, 2]] + 2} -> 
+           datalist[[1, 
+            1]], {(maxq - datalist[[2, 2, 1]])/2 + 2, -mint + 
+             datalist[[2, 2, 2]] + 2} -> datalist[[2, 1]]}, 
+         datalist /. {x_, {y_, 
+             z_}} -> {(maxq - y)/2 + 2, -mint + z + 2} -> x]]
+      ]
+     ]
+    , Automatic, ""], Frame -> All, 
+   Background -> {1 -> LightBlue, 1 -> LightBlue, {1, 1} -> None}
+   ];
+VisualKh[K_] := LaurentToTable[Kh[K][q, t]];
+
+swtch[X[i_, j_, k_, l_]] := 
+  If[PositiveQ[X[i, j, k, l]], X[l, i, j, k], X[j, k, l, i]];
+
+DiagSwitch[L_PD, binary_List] := MapAt[swtch, L, Position[binary, 1]];
+
+CCKerImg[L_PD, r_Integer, deg_Integer] :=
+  Block[{u, w, basisdom, basisrange, newvarsdom, newvarsdomReversed, 
+    newvarsrange, dMatrix},
+   basisdom = 
+    If[CC[L, r, deg] == {} || CC[L, r, deg] === {0}, 
+     Return[{{0}, {0}}], CC[L, r, deg]];
+   newvarsdom = 
+    MapThread[Rule, {basisdom, Array[u, Length[basisdom]]}];
+   newvarsdomReversed = 
+    MapThread[Rule, {Array[u, Length[basisdom]], basisdom}];
+   basisrange = 
+    If[CC[L, r + 1, deg] == {} || CC[L, r + 1, deg] === {0},
+     Return[{
+       basisdom,
+       If[CC[L, r - 1, deg] == {} || CC[L, r - 1, deg] === {0}, {0},
+        Switch[
+         Reduce[(d[L][CC[L, r - 1, deg]] /. newvarsdom) == 0, 
+           Values[newvarsdom]] /. lh_ == rh_ -> lh - rh,
+         True, {0},
+         _u, {(Reduce[(d[L][CC[L, r - 1, deg]] /. newvarsdom) == 0, 
+              Values[newvarsdom]] /. lh_ == rh_ -> lh - rh) /. 
+           newvarsdomReversed},
+         _Plus, {(Reduce[(d[L][CC[L, r - 1, deg]] /. newvarsdom) == 0,
+               Values[newvarsdom]] /. lh_ == rh_ -> lh - rh) /. 
+           newvarsdomReversed},
+         _And, (List @@ 
+             Reduce[(d[L][CC[L, r - 1, deg]] /. newvarsdom) == 0, 
+              Values[newvarsdom]] /. lh_ == rh_ -> lh - rh) /. 
+          newvarsdomReversed
+         ]
+        ]
+       }
+      ],
+     CC[L, r + 1, deg]];
+   newvarsrange = 
+    MapThread[Rule, {basisrange, Array[w, Length[basisrange]]}];
+   Off[SparseArray::posd];
+   dMatrix =
+    Transpose[Level[Normal[
+       Replace[
+        d[L][basisdom] /. newvarsrange /. 
+         w[y_] -> SparseArray[{1, y} -> 1, {1, Length[basisrange]}], 
+        0 -> SparseArray[{1, 1} -> 0, {1, Length[basisrange]}], {1}]
+       ]
+      , {2}]
+     ];
+   On[SparseArray::posd];
+   {
+    If[NullSpace[dMatrix] == {}, {0}, NullSpace[dMatrix].basisdom],
+    If[CC[L, r - 1, deg] == {} || CC[L, r - 1, deg] === {0}, {0},
+     Switch[
+      Reduce[(d[L][CC[L, r - 1, deg]] /. newvarsdom) == 0, 
+        Values[newvarsdom]] /. lh_ == rh_ -> lh - rh,
+      True, {0},
+      _u, {(Reduce[(d[L][CC[L, r - 1, deg]] /. newvarsdom) == 0, 
+           Values[newvarsdom]] /. lh_ == rh_ -> lh - rh) /. 
+        newvarsdomReversed},
+      _Plus, {(Reduce[(d[L][CC[L, r - 1, deg]] /. newvarsdom) == 0, 
+           Values[newvarsdom]] /. lh_ == rh_ -> lh - rh) /. 
+        newvarsdomReversed},
+      _And, (List @@ 
+          Reduce[(d[L][CC[L, r - 1, deg]] /. newvarsdom) == 0, 
+           Values[newvarsdom]] /. lh_ == rh_ -> lh - rh) /. 
+       newvarsdomReversed
+      ]
+     ]
+    }
+   ];
+
+DiagCube[L_PD, s_Integer] := 
+  DiagSwitch[L, #] & /@ 
+   Permutations[
+    Join[ConstantArray[1, s], ConstantArray[0, Length[L] - s]]];
+KhovCube[L_PD, s_Integer] := 
+  Expand[Kh[#][q, t] & /@ DiagCube[L, s]*q^(2 s)];
+qtValues[poly_] := 
+  If[Head[poly] =!= Plus, {myLog[poly]}, myLog /@ List @@ poly];
+Allqt[L_PD] := Block[{list = {}},
+   Do[
+    AppendTo[list, 
+     Union[Select[Level[qtValues /@ KhovCube[L, i], {3}], ListQ]]]
+    , {i, 0, Length[L]}];
+   Union[Level[list, {2}]]
+   ];
+
+(*Next: Define the chain groups and the differential for BigH*)
